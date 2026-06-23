@@ -1,0 +1,9 @@
+.env
+seed_memory.py
+test_chroma.py
+.venv/
+__pycache__/
+*.pyc
+
+docker-compose.chroma.yml
+docker-compose.timescale.yml
