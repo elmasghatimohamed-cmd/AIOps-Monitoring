@@ -23,13 +23,16 @@ def generate_hourly_prediction_json():
     
     current_time = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     
-    #Generates a 60-minute lookahead window at 5-minute intervals 
+    # Generates a 60-minute lookahead window at 5-minute intervals 
     future_timestamps = pd.date_range(start=current_time, periods=13, freq='5min')
     future = pd.DataFrame({'ds': future_timestamps})
-    
     future['ds'] = future['ds'].dt.tz_localize(None)
     
-    print("Executing linear regression trend projection across the 1-hour horizon...")
+    #   Inject strict physical boundaries to match the logistic model ---
+    future['cap'] = 100.0   # Matches the training ceiling
+    future['floor'] = 0.0   # Matches the training floor to prevent negative CPU values
+    
+    print("Executing logistic regression trend projection across the 1-hour horizon...")
     forecast = model.predict(future)
     
     payload = {
@@ -43,11 +46,16 @@ def generate_hourly_prediction_json():
     }
     
     for _, row in forecast.iterrows():
+        # Optional: Extra safety fallback at the code level to clamp any minor float deviations
+        predicted_value = max(0.0, round(float(row['yhat']), 2))
+        confidence_floor = max(0.0, round(float(row['yhat_lower']), 2))
+        confidence_ceiling = min(100.0, round(float(row['yhat_upper']), 2))
+
         payload["predictions"].append({
             "timestamp": row['ds'].strftime('%Y-%m-%d %H:%M:%S'),
-            "predicted_value_baseline": round(float(row['yhat']), 2),
-            "confidence_floor": round(float(row['yhat_lower']), 2),
-            "confidence_ceiling": round(float(row['yhat_upper']), 2)
+            "predicted_value_baseline": predicted_value,
+            "confidence_floor": confidence_floor,
+            "confidence_ceiling": confidence_ceiling
         })
         
     return json.dumps(payload, indent=2)
