@@ -5,5 +5,7 @@ test_chroma.py
 __pycache__/
 *.pyc
 
+models/*.pkl
+
 docker-compose.chroma.yml
 docker-compose.timescale.yml
