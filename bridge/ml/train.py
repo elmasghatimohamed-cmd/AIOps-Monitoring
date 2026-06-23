@@ -1,17 +1,24 @@
-# train.py
 import os
 import joblib
 import pandas as pd
 import psycopg2
 from prophet import Prophet
 from datetime import datetime, timezone
+from pathlib import Path
+from dotenv import load_dotenv
 
 def extract_historical_metrics(days_horizon: int = 1) -> pd.DataFrame:
     """
     Connecting to TimescaleDB, queries historical metrics, and group them 
     into clean 5-minute operational blocks for optimal model training.
     """
+    root_dir = Path(__file__).resolve().parent.parent.parent
+    load_dotenv(dotenv_path=root_dir / ".env")
+    
     db_uri = os.getenv("TIMESCALE_DSN")
+    if not db_uri:
+        raise KeyError("[ML Ingestion Error]: TIMESCALE_DSN was not found. Verify your root .env file exists.")
+        
     conn = psycopg2.connect(db_uri)
     
     query = f"""
@@ -38,18 +45,25 @@ def extract_historical_metrics(days_horizon: int = 1) -> pd.DataFrame:
     return df
 
 def execute_training_pipeline():
+    # 1. Pull the data
     data = extract_historical_metrics(days_horizon=1)
     
     if data.empty or len(data) < 5:
-        print("Training aborted. Insufficient metrics found matching the clean data schema.")
+        print("[ML Error]: Training aborted. Insufficient metrics found.")
         return
+
+    # 2. Add the physical saturation caps directly to the training dataframe
+    data['cap'] = 100.0   # Maximum possible physical limit
+    data['floor'] = 0.0   # Minimum possible physical limit
 
     os.makedirs("models", exist_ok=True)
     
-    print("Initializing mathematical training sequence for srv-prod-app-01 cpu...")
+    print("[ML Engine]: Initializing mathematical training sequence...")
     
+    # 3. Initialize Prophet with 'logistic' growth
     model = Prophet(
-        changepoint_prior_scale=0.5,
+        growth='logistic',           # Enforces the cap and floor boundaries
+        changepoint_prior_scale=0.1, # Smooth out the trend adjustments
         yearly_seasonality=False, 
         weekly_seasonality=False, 
         daily_seasonality=True
@@ -59,7 +73,7 @@ def execute_training_pipeline():
     
     model_filename = "models/telemetry_forecaster.pkl"
     joblib.dump(model, model_filename)
-    print(f"[ML Success]: Model weight matrix serialized and saved to {model_filename}")
+    print(f"[ML Success]: Model weights saved to {model_filename}")
 
 if __name__ == "__main__":
     execute_training_pipeline()
